@@ -1,10 +1,10 @@
-**# Ollama Library Scraper**
+# Ollama Library Scraper
 
 A Python data-analysis pipeline that scrapes model information from the **Ollama model library**, cleans and normalizes the collected data, calculates model efficiency metrics, identifies **Pareto frontiers**, and visualizes the resulting model trade-offs in 2D or 3D.
 
-**---**
+---
 
-**## Version**
+## Version
 
 ****v2.0.0****
 
@@ -66,7 +66,7 @@ A Python data-analysis pipeline that scrapes model information from the **Ollama
 
 * Uses typed `TypedDict` structures to maintain consistent data between pipeline stages.
 
-**---**
+---
 
 ## Project Structure
 
@@ -85,7 +85,7 @@ ollama-model-analyzer/
 └── LICENSE
 ```
 
-**---**
+---
 
 ## Explanation
 
@@ -364,7 +364,7 @@ VARIABLE_COUNT: int = 2
 
 No `.env` file or additional configuration is required.
 
-**---**
+---
 
 ## Usage
 
@@ -430,8 +430,8 @@ Debug output can be enabled or disabled independently through the configuration 
 
 * `urllib.parse`
 
-**---**
-**## Attribution**
+---
+## Attribution
 
 This project is an independent tool and is not affiliated with or endorsed by Ollama.
 
