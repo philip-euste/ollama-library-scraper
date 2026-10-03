@@ -1,49 +1,73 @@
-from colorama import Fore
+from time import perf_counter
 
-def cleaning_data(data):
-    accepted = []
-    rejected = []
+from constants import print_stats, print_breakline, ModelData, FG, FR
 
-    BANNED_FAMILIES = ["bge", "embed"]
-    BANNED_VARIANTS = ["cloud", "latest", "mlx", 'x', 'q', 'fp']
+# =========================================================
+# CLEAN DATA
+# =========================================================
 
-    PRINT_REJECTED = False
-    PRINT_ACCEPTED = False
+def cleaning_main(data: list[ModelData], debug_cleaned_rejected: bool = False, debug_cleaned_accepted: bool = False) -> list[ModelData]:
 
-    def rejection_print(d):
-        rejected.append(d)
-        if PRINT_REJECTED:
-            print(f"{Fore.LIGHTRED_EX}REJECTED:{Fore.RESET} {d}")
-    for d in data:
-        if any(word in d["variant"].lower() for word in BANNED_VARIANTS): # quantized, cloud, latest, mlx, expert-mixed
-            rejection_print(d)
-            continue
-        if any(word in d["family"].lower() for word in BANNED_FAMILIES): # embedding families
-            rejection_print(d)
-            continue
-        if d['storage'] is None: # cloud storages
-            rejection_print(d)
-            continue
-        if d['variant'].startswith("e"): # expert parameters
-            rejection_print(d)
-            continue
+    start_time: float = perf_counter()
 
-        first = d['variant'].split("-")[0]
+    accepted: list[ModelData] = []
+    rejected: list[ModelData] = []
 
-        if not (first.endswith("b") or first.endswith("m")): # others
-            rejection_print(d)
+    banned_families: tuple[str, ...] = ("bge", "embed")
+    banned_variants: tuple[str, ...] = ("cloud", "latest", "mlx", "x", "q", "fp")
+
+    def rejection_print(model: ModelData) -> None:
+        rejected.append(model)
+
+        if debug_cleaned_rejected:
+            print_stats(f"REJECTED: {model}", FR)
+
+    for model in data:
+        variant: str | None = model["variant"]
+        family: str = model["family"]
+        storage: str | None = model["storage"]
+        capabilities: list[str] = model["capabilities"]
+
+        if variant is None:
+            rejection_print(model)
             continue
 
-        if 'embedding' in d['capabilities']: # embedding
-            rejection_print(d)
+        if any(word in variant.lower() for word in banned_variants):
+            rejection_print(model)
             continue
-        
-        accepted.append(d)
-        if PRINT_ACCEPTED:
-            print(f"{Fore.LIGHTGREEN_EX}ACCEPTED:{Fore.RESET} {d}")
 
-    print(f"Total Uncleaned Data: {len(data)}")
-    print(f"Accepted Data: {len(accepted)}")
-    print(f"Rejected Data: {len(rejected)}")
+        if any(word in family.lower() for word in banned_families):
+            rejection_print(model)
+            continue
+
+        if storage is None:
+            rejection_print(model)
+            continue
+
+        if variant.startswith("e"):
+            rejection_print(model)
+            continue
+
+        first: str = variant.split("-")[0]
+
+        if not (first.endswith("b") or first.endswith("m")):
+            rejection_print(model)
+            continue
+
+        if "embedding" in capabilities:
+            rejection_print(model)
+            continue
+
+        accepted.append(model)
+
+        if debug_cleaned_accepted:
+            print_stats(f"ACCEPTED: {model}", FG)
+
+    print_breakline(80)
+    print_stats(f"Total Uncleaned Data: {len(data)}")
+    print_stats(f"Accepted Data: {len(accepted)}", FG)
+    print_stats(f"Rejected Data: {len(rejected)}", FR)
+    print_stats(f"Cleaning duration: {perf_counter() - start_time:.2f} seconds")
+    print_breakline(80)
 
     return accepted

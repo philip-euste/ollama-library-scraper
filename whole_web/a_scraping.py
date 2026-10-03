@@ -1,66 +1,100 @@
 import requests
-from bs4 import BeautifulSoup
+from bs4 import BeautifulSoup, Tag
 from concurrent.futures import ThreadPoolExecutor
+from urllib.parse import urljoin
+from time import perf_counter
 
-STARTING_URL = "https://ollama.com/library"
-HEADERS = {"User-Agent": "Mozilla/5.0"}
+from constants import print_stats, print_breakline, ModelData
 
-SESSION = requests.Session()
-SESSION.headers.update(HEADERS)
 
 # =========================================================
 # GETTING STARTING URLS
 # =========================================================
 
-response = SESSION.get(STARTING_URL)
-response.raise_for_status()
+def get_family_urls(session: requests.Session, starting_url: str, base_url: str) -> list[str]:
+    response: requests.Response = session.get(starting_url)
+    response.raise_for_status()
 
-soup = BeautifulSoup(response.text, "html.parser")
+    soup: BeautifulSoup = BeautifulSoup(response.text, "html.parser")
+    url_results: list[str] = []
 
-list_items = soup.find_all(
-    "li",
-    class_="flex items-baseline border-b border-neutral-200 py-6"
-)
+    for item in soup.select('a[href^="/library/"]'):
+        href: object = item.get("href")
 
-url_results = []
+        if not isinstance(href, str):
+            continue
 
-for item in list_items:
-    name = item.find("span", class_="group-hover:underline truncate").get_text(strip=True)
-    url_results.append(f"{STARTING_URL}/{name}")
+        url: str = urljoin(base_url, href)
+
+        if url not in url_results:
+            url_results.append(url)
+
+    return url_results
+
 
 # =========================================================
 # SCRAPE ONE MODEL FAMILY
 # =========================================================
 
-def scrape_family(url):
-    response = SESSION.get(url)
+def scrape_family(url: str) -> list[ModelData]:
+    headers: dict[str, str] = {"User-Agent": "Mozilla/5.0"}
+
+    session: requests.Session = requests.Session()
+    session.headers.update(headers)
+
+    response: requests.Response = session.get(url)
     response.raise_for_status()
 
-    soup = BeautifulSoup(response.text, "html.parser")
+    soup: BeautifulSoup = BeautifulSoup(response.text, "html.parser")
 
-    general_capabilities = soup.find_all("span", class_="inline-flex items-center rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 sm:text-[13px]") 
-    capabilities = [c.get_text(strip=True) for c in general_capabilities]  
+    # -----------------------------------------------------
+    # GENERAL CAPABILITIES
+    # -----------------------------------------------------
 
-    list_items = soup.find_all("div", class_="hidden group px-4 py-3 sm:grid sm:grid-cols-12 text-[13px]")
+    general_capabilities: list[Tag] = soup.find_all("span", class_="inline-flex items-center rounded-md bg-indigo-50 px-2 py-0.5 text-xs font-medium text-indigo-600 sm:text-[13px]")
 
-    results = []
+    capabilities: list[str] = [capability.get_text(strip=True) for capability in general_capabilities]
 
+    # -----------------------------------------------------
+    # FIND MODEL ENTRIES
+    # -----------------------------------------------------
+
+    list_items: list[Tag] = soup.find_all("div", class_="hidden group px-4 py-3 sm:grid sm:grid-cols-12 text-[13px]")
+
+    results: list[ModelData] = []
 
     for item in list_items:
-        full_name = item.find(
-            "a",
-            class_="block group-hover:underline text-sm font-medium text-neutral-800"
-        ).get_text(strip=True)
+        name_element: Tag | None = item.find("a", class_="block group-hover:underline text-sm font-medium text-neutral-800")
 
-        variant = None
-        family, variant = full_name.split(":", 1)
+        if name_element is None:
+            continue
 
-        storage = None
-        context = None
-        modalities = []
+        full_name: str = name_element.get_text(strip=True)
 
-        for p in item.find_all("p", class_="col-span-2 text-neutral-500"):
-            text = p.get_text(strip=True)
+        # -------------------------------------------------
+        # FAMILY / VARIANT
+        # -------------------------------------------------
+
+        if ":" in full_name:
+            family: str
+            variant: str | None
+            family, variant = full_name.split(":", 1)
+        else:
+            family = full_name
+            variant = None
+
+        # -------------------------------------------------
+        # STORAGE / CONTEXT / MODALITIES
+        # -------------------------------------------------
+
+        storage: str | None = None
+        context: str | None = None
+        modalities: list[str] = []
+
+        paragraphs: list[Tag] = item.find_all("p", class_="col-span-2 text-neutral-500")
+
+        for paragraph in paragraphs:
+            text: str = paragraph.get_text(strip=True)
 
             if text.endswith(("MB", "GB", "TB")):
                 storage = text
@@ -69,36 +103,56 @@ def scrape_family(url):
                 context = text
 
             else:
-                modalities.extend(
-                    x.strip()
-                    for x in text.split(",")
-                )
+                modalities.extend(part.strip() for part in text.split(",") if part.strip())
 
-        if context is not None and context.isdigit(): # That one 512 D:
+        # That one 512 D:
+        if context is not None and context.isdigit():
             context += "K"
 
-        result_dict = {
+        # -------------------------------------------------
+        # RESULT
+        # -------------------------------------------------
+
+        result_dict: ModelData = {
             "full_name": full_name,
             "family": family,
             "variant": variant,
             "storage": storage,
             "context": context,
-            "capabilities": capabilities.copy()
+            "capabilities": capabilities.copy(),
+            "modalities": modalities,
         }
 
         results.append(result_dict)
 
     return results
 
+
 # =========================================================
 # SCRAPE EVERYTHING IN PARALLEL
 # =========================================================
 
-def threading_web_data():
-    final_result = []
+def scraping_main(scrape_debug: bool = False) -> list[ModelData]:
+    base_url: str = "https://ollama.com"
+    starting_url: str = f"{base_url}/library"
+    headers: dict[str, str] = {"User-Agent": "Mozilla/5.0"}
+    max_workers: int = 10
 
-    with ThreadPoolExecutor(max_workers=10) as executor:
-        for family_models in executor.map(scrape_family, url_results):
+    start_time: float = perf_counter()
+
+    session: requests.Session = requests.Session()
+    session.headers.update(headers)
+
+    family_urls: list[str] = get_family_urls(session, starting_url, base_url)
+    final_result: list[ModelData] = []
+
+    with ThreadPoolExecutor(max_workers=max_workers) as executor:
+        for family_models in executor.map(scrape_family, family_urls):
             final_result.extend(family_models)
-    
+
+    if scrape_debug:
+        print_breakline(80)
+        print_stats(f"Scraping duration: {perf_counter() - start_time:.2f} seconds")
+        print_breakline(80)
+
     return final_result
